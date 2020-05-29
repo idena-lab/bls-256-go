@@ -7,6 +7,12 @@
 // Package bn256 implements the Optimal Ate pairing over a 256-bit Barreto-Naehrig curve.
 package bn256
 
+import (
+	"bls-256-go/bn256/cloudflare"
+	"io"
+	"math/big"
+)
+
 // G1 is an abstract cyclic group. The zero value is suitable for use as the
 // output of an operation, but cannot be used as an input.
 type G1 = bn256.G1
@@ -19,3 +25,12 @@ type G2 = bn256.G2
 func PairingCheck(a []*G1, b []*G2) bool {
 	return bn256.PairingCheck(a, b)
 }
+
+func RandomG1(r io.Reader) (*big.Int, *G1, error) {
+	return bn256.RandomG1(r)
+}
+
+func RandomG2(r io.Reader) (*big.Int, *G2, error) {
+	return bn256.RandomG2(r)
+}
+
