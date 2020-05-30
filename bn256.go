@@ -12,6 +12,14 @@ func bigFromBase10(s string) *big.Int {
 	return n
 }
 
+func bigFromBase16(s string) *big.Int {
+	if s[:2] == "0x" || s[:2] == "0X" {
+		s = s[2:]
+	}
+	n, _ := new(big.Int).SetString(s, 16)
+	return n
+}
+
 // p is a prime over which we form a basic field: 36u⁴+36u³+24u²+6u+1.
 var P = bigFromBase10("21888242871839275222246405745257275088696311157297823662689037894645226208583")
 
@@ -135,4 +143,20 @@ func PointToStringG2(p *bn256.G1) string {
 		hex.EncodeToString(m[:32]), hex.EncodeToString(m[32:64]),
 		hex.EncodeToString(m[64:96]), hex.EncodeToString(m[96:]),
 	)
+}
+
+func PointToInt1(p *bn256.G1) (x, y *big.Int) {
+	bytes := p.Marshal()
+	x = new(big.Int).SetBytes(bytes[0:32])
+	y = new(big.Int).SetBytes(bytes[32:])
+	return
+}
+
+func PointToInt2(p *bn256.G2) (xx, xy, yx, yy *big.Int) {
+	bytes := p.Marshal()
+	xx = new(big.Int).SetBytes(bytes[0:32])
+	xy = new(big.Int).SetBytes(bytes[32:64])
+	yx = new(big.Int).SetBytes(bytes[64:96])
+	yy = new(big.Int).SetBytes(bytes[96:])
+	return
 }
