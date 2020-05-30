@@ -20,6 +20,22 @@ func bigFromBase16(s string) *big.Int {
 	return n
 }
 
+// convert big int to byte array
+// `minLen` is the minimum length of the array
+func bigToBytes(bi *big.Int, minLen int) []byte {
+	b := bi.Bytes()
+	if minLen <= len(b) {
+		return b
+	}
+	m := make([]byte, minLen)
+	copy(m[minLen-len(b):], b)
+	return m
+}
+
+func bigToHex32(bi *big.Int) string {
+	return hex.EncodeToString(bigToBytes(bi, 32))
+}
+
 // p is a prime over which we form a basic field: 36u⁴+36u³+24u²+6u+1.
 var P = bigFromBase10("21888242871839275222246405745257275088696311157297823662689037894645226208583")
 
@@ -146,17 +162,17 @@ func PointToStringG2(p *bn256.G1) string {
 }
 
 func PointToInt1(p *bn256.G1) (x, y *big.Int) {
-	bytes := p.Marshal()
-	x = new(big.Int).SetBytes(bytes[0:32])
-	y = new(big.Int).SetBytes(bytes[32:])
+	m := p.Marshal()
+	x = new(big.Int).SetBytes(m[0:32])
+	y = new(big.Int).SetBytes(m[32:])
 	return
 }
 
 func PointToInt2(p *bn256.G2) (xx, xy, yx, yy *big.Int) {
-	bytes := p.Marshal()
-	xx = new(big.Int).SetBytes(bytes[0:32])
-	xy = new(big.Int).SetBytes(bytes[32:64])
-	yx = new(big.Int).SetBytes(bytes[64:96])
-	yy = new(big.Int).SetBytes(bytes[96:])
+	m := p.Marshal()
+	xx = new(big.Int).SetBytes(m[0:32])
+	xy = new(big.Int).SetBytes(m[32:64])
+	yx = new(big.Int).SetBytes(m[64:96])
+	yy = new(big.Int).SetBytes(m[96:])
 	return
 }
