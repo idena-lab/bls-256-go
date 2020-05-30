@@ -7,35 +7,6 @@ import (
 	"math/big"
 )
 
-func bigFromBase10(s string) *big.Int {
-	n, _ := new(big.Int).SetString(s, 10)
-	return n
-}
-
-func bigFromBase16(s string) *big.Int {
-	if s[:2] == "0x" || s[:2] == "0X" {
-		s = s[2:]
-	}
-	n, _ := new(big.Int).SetString(s, 16)
-	return n
-}
-
-// convert big int to byte array
-// `minLen` is the minimum length of the array
-func bigToBytes(bi *big.Int, minLen int) []byte {
-	b := bi.Bytes()
-	if minLen <= len(b) {
-		return b
-	}
-	m := make([]byte, minLen)
-	copy(m[minLen-len(b):], b)
-	return m
-}
-
-func bigToHex32(bi *big.Int) string {
-	return hex.EncodeToString(bigToBytes(bi, 32))
-}
-
 // p is a prime over which we form a basic field: 36u⁴+36u³+24u²+6u+1.
 var P = bigFromBase10("21888242871839275222246405745257275088696311157297823662689037894645226208583")
 
@@ -175,4 +146,10 @@ func PointToInt2(p *bn256.G2) (xx, xy, yx, yy *big.Int) {
 	yx = new(big.Int).SetBytes(m[64:96])
 	yy = new(big.Int).SetBytes(m[96:])
 	return
+}
+
+// aggregate points on the same curve (G1 or G2)
+func aggregatePoints(points interface{}) interface{} {
+	// todo
+	return nil
 }
