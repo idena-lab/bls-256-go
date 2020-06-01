@@ -2,16 +2,14 @@ package bls
 
 import (
 	"bls-256-go/bn256"
-	"encoding/hex"
-	"fmt"
 	"math/big"
 )
 
 // p is a prime over which we form a basic field: 36u⁴+36u³+24u²+6u+1.
-var P = bigFromBase10("21888242871839275222246405745257275088696311157297823662689037894645226208583")
+var P = BigFromBase10("21888242871839275222246405745257275088696311157297823662689037894645226208583")
 
 // Order is the number of elements in both G₁ and G₂: 36u⁴+36u³+18u²+6u+1.
-var Order = bigFromBase10("21888242871839275222246405745257275088548364400416034343698204186575808495617")
+var Order = BigFromBase10("21888242871839275222246405745257275088548364400416034343698204186575808495617")
 
 var Fp1Div2 = new(big.Int).Div(P, two)
 var G1B = big.NewInt(3)
@@ -24,10 +22,10 @@ var P1Neg = new(bn256.G1).Neg(P1)
 
 // generator of G2
 var P2, _ = BuildG2(
-	bigFromBase10("11559732032986387107991004021392285783925812861821192530917403151452391805634"),
-	bigFromBase10("10857046999023057135944570762232829481370756359578518086990519993285655852781"),
-	bigFromBase10("4082367875863433681332203403145435568316851327593401208105741076214120093531"),
-	bigFromBase10("8495653923123431417604973247489272438418190587263600148770280649306958101930"))
+	BigFromBase10("11559732032986387107991004021392285783925812861821192530917403151452391805634"),
+	BigFromBase10("10857046999023057135944570762232829481370756359578518086990519993285655852781"),
+	BigFromBase10("4082367875863433681332203403145435568316851327593401208105741076214120093531"),
+	BigFromBase10("8495653923123431417604973247489272438418190587263600148770280649306958101930"))
 
 // create G1 point from big.Int(s)
 func BuildG1(x, y *big.Int) (*bn256.G1, error) {
@@ -122,19 +120,6 @@ func calcQuadRes(ySqr *big.Int, q *big.Int) *big.Int {
 	return zero
 }
 
-func PointToStringG1(p *bn256.G1) string {
-	m := p.Marshal()
-	return fmt.Sprintf("x: 0x%s, y: 0x%s", hex.EncodeToString(m[:32]), hex.EncodeToString(m[32:]))
-}
-
-func PointToStringG2(p *bn256.G1) string {
-	m := p.Marshal()
-	return fmt.Sprintf("x: [0x%s, 0x%s], y: [0x%s, 0x%s]",
-		hex.EncodeToString(m[:32]), hex.EncodeToString(m[32:64]),
-		hex.EncodeToString(m[64:96]), hex.EncodeToString(m[96:]),
-	)
-}
-
 func PointToInt1(p *bn256.G1) []*big.Int {
 	m := p.Marshal()
 	x := new(big.Int).SetBytes(m[0:32])
@@ -149,6 +134,16 @@ func PointToInt2(p *bn256.G2) []*big.Int {
 	yx := new(big.Int).SetBytes(m[64:96])
 	yy := new(big.Int).SetBytes(m[96:])
 	return []*big.Int{xx, xy, yx, yy}
+}
+
+func PointToHex1(p *bn256.G1) [2]string {
+	xy := PointToInt1(p)
+	return [2]string{BigToHex32(xy[0]), BigToHex32(xy[1])}
+}
+
+func PointToHex2(p *bn256.G2) [4]string {
+	bis := PointToInt2(p)
+	return [4]string{BigToHex32(bis[0]), BigToHex32(bis[1]), BigToHex32(bis[2]), BigToHex32(bis[3])}
 }
 
 // aggregate points on the curve G1
@@ -176,4 +171,3 @@ func aggregatePoints2(points []*bn256.G2) *bn256.G2 {
 	}
 	return g
 }
-
