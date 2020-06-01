@@ -19,6 +19,9 @@ var G1B = big.NewInt(3)
 // generator of G1
 var P1, _ = BuildG1(big.NewInt(1), big.NewInt(2))
 
+// negative P1
+var P1Neg = new(bn256.G1).Neg(P1)
+
 // generator of G2
 var P2, _ = BuildG2(
 	bigFromBase10("11559732032986387107991004021392285783925812861821192530917403151452391805634"),
@@ -132,20 +135,20 @@ func PointToStringG2(p *bn256.G1) string {
 	)
 }
 
-func PointToInt1(p *bn256.G1) (x, y *big.Int) {
+func PointToInt1(p *bn256.G1) []*big.Int {
 	m := p.Marshal()
-	x = new(big.Int).SetBytes(m[0:32])
-	y = new(big.Int).SetBytes(m[32:])
-	return
+	x := new(big.Int).SetBytes(m[0:32])
+	y := new(big.Int).SetBytes(m[32:])
+	return []*big.Int{x, y}
 }
 
-func PointToInt2(p *bn256.G2) (xx, xy, yx, yy *big.Int) {
+func PointToInt2(p *bn256.G2) []*big.Int {
 	m := p.Marshal()
-	xx = new(big.Int).SetBytes(m[0:32])
-	xy = new(big.Int).SetBytes(m[32:64])
-	yx = new(big.Int).SetBytes(m[64:96])
-	yy = new(big.Int).SetBytes(m[96:])
-	return
+	xx := new(big.Int).SetBytes(m[0:32])
+	xy := new(big.Int).SetBytes(m[32:64])
+	yx := new(big.Int).SetBytes(m[64:96])
+	yy := new(big.Int).SetBytes(m[96:])
+	return []*big.Int{xx, xy, yx, yy}
 }
 
 // aggregate points on the same curve (G1 or G2)

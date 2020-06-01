@@ -25,8 +25,9 @@ func TestHashToG1(t *testing.T) {
 		p := HashToG1([]byte(msg))
 		// t.Logf(PointToStringG1(p))
 		p.Marshal()
-		x1, y1 := PointToInt1(p)
-		assert.Equal(t, bigFromBase16(x).Text(16), x1.Text(16))
-		assert.Equal(t, bigFromBase16(y).Text(16), y1.Text(16))
+		pi := PointToInt1(p)
+		assert.Equal(t, bigFromBase16(x).Text(16), pi[0].Text(16))
+		assert.Equal(t, bigFromBase16(y).Text(16), pi[1].Text(16))
 	}
 }
+
