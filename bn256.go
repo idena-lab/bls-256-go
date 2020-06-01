@@ -151,8 +151,29 @@ func PointToInt2(p *bn256.G2) []*big.Int {
 	return []*big.Int{xx, xy, yx, yy}
 }
 
-// aggregate points on the same curve (G1 or G2)
-func aggregatePoints(points interface{}) interface{} {
-	// todo
-	return nil
+// aggregate points on the curve G1
+func aggregatePoints1(points []*bn256.G1) *bn256.G1 {
+	if len(points) < 1 {
+		return nil
+	}
+	g := new(bn256.G1).Set(points[0])
+	// todo: use go routine
+	for i := 1; i < len(points); i++ {
+		g = g.Add(g, points[i])
+	}
+	return g
 }
+
+// aggregate points on the curve G2
+func aggregatePoints2(points []*bn256.G2) *bn256.G2 {
+	if len(points) < 1 {
+		return nil
+	}
+	g := new(bn256.G2).Set(points[0])
+	// todo: use go routine
+	for i := 1; i < len(points); i++ {
+		g = g.Add(g, points[i])
+	}
+	return g
+}
+

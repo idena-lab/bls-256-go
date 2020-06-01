@@ -134,21 +134,21 @@ func NewSignature(x, y *big.Int) (*Signature, error) {
 	return &Signature{s: *s}, nil
 }
 
-func AggregatePubKeys1(keys []PubKey1) *PubKey1 {
+func AggregatePubKeys1(keys []*PubKey1) *PubKey1 {
 	points := make([]*bn256.G1, len(keys))
 	for i := 0; i < len(keys); i++ {
 		points[i] = &keys[i].pk
 	}
-	p, _ := aggregatePoints(points).(*bn256.G1)
+	p := aggregatePoints1(points)
 	return &PubKey1{pk: *p}
 }
 
-func AggregatePubKeys2(keys []PubKey2) *PubKey2 {
+func AggregatePubKeys2(keys []*PubKey2) *PubKey2 {
 	points := make([]*bn256.G2, len(keys))
 	for i := 0; i < len(keys); i++ {
 		points[i] = &keys[i].pk
 	}
-	p, _ := aggregatePoints(points).(*bn256.G2)
+	p := aggregatePoints2(points)
 	return &PubKey2{pk: *p}
 }
 
@@ -157,6 +157,6 @@ func AggregateSignatures(signs []*Signature) *Signature {
 	for i := 0; i < len(signs); i++ {
 		points[i] = &signs[i].s
 	}
-	p, _ := aggregatePoints(points).(*bn256.G1)
+	p := aggregatePoints1(points)
 	return &Signature{s: *p}
 }

@@ -2,6 +2,8 @@ package bls
 
 import (
 	"encoding/hex"
+	"encoding/json"
+	"fmt"
 	"github.com/stretchr/testify/assert"
 	"testing"
 )
@@ -92,16 +94,77 @@ func TestSign(t *testing.T) {
 		// the right one
 		assert.True(t, Verify(m, s, priKey.GetPub2()), string(m))
 
-		// dump pairing test data
+		// // dump pairing solidity pairing test
 		// hm := HashToG1(m)
 		// pair := make([]*big.Int, 0)
 		// pair = append(pair, PointToInt1(hm)...)
 		// pair = append(pair, PointToInt2(priKey.GetPub2().GetPoint())...)
 		// pair = append(pair, PointToInt1(s.GetPoint())...)
 		// pair = append(pair, PointToInt2(P2)...)
+		// // for solidity pairing
 		// println(string(m))
 		// for _, p := range pair {
 		// 	println("0x" + bigToHex32(p))
 		// }
 	}
+}
+
+// generate test cases for solidity verify()
+func Test_GenTestsForSolidityVerify(t *testing.T) {
+	type testCase struct {
+		// count of keys aggregated
+		Keys int `json:"keys"`
+		// aggregated G1 public keys
+		Apk1 [2]string `json:"apk1"`
+		// aggregated G2 public keys
+		Apk2 [4]string `json:"apk2"`
+		// message to sign
+		Message string `json:"message"`
+		// aggregated signature
+		Signature [2]string `json:"signature"`
+	}
+	tests := []*testCase{
+		{Keys: 1, Message: ""},
+		{Keys: 1, Message: "idena go"},
+		{Keys: 1, Message: "long message: 9999999999999999999999999999999999999999999999999999999999999999999999999999999999999999"},
+		{Keys: 2, Message: "2 keys 1"},
+		{Keys: 2, Message: "2 keys 2"},
+		{Keys: 3, Message: "3 keys"},
+		{Keys: 4, Message: "4 keys"},
+		{Keys: 10, Message: "10 keys"},
+		{Keys: 100, Message: "100 keys"},
+		{Keys: 356, Message: "356 keys"},
+		{Keys: 800, Message: "800 keys"},
+		{Keys: 1024, Message: "1024 keys"},
+		{Keys: 2048, Message: "2048 keys"},
+		{Keys: 4000, Message: "4000 keys"},
+		{Keys: 6000, Message: "4000 keys"},
+		{Keys: 9000, Message: "9000 keys"},
+		{Keys: 10000, Message: "10000 keys"},
+	}
+	priKeys := make([]*PriKey, 0)
+	pubKeys1 := make([]*PubKey1, 0)
+	pubKeys2 := make([]*PubKey2, 0)
+	for i, tc := range tests {
+		fmt.Printf("generating %v: keys=%v, message=%v\n", i+1, tc.Keys, tc.Message)
+		// prepare keys
+		for i := len(priKeys); i < tc.Keys; i++ {
+			k, _ := NewPriKey(nil)
+			priKeys = append(priKeys,  k)
+			pubKeys1, pubKeys2 = append(pubKeys1, k.GetPub1()), append(pubKeys2, k.GetPub2())
+		}
+		sigs := make([]*Signature, tc.Keys)
+		for i := 0; i < tc.Keys; i++ {
+			sigs[i] = priKeys[i].Sign([]byte(tc.Message))
+		}
+		asig := PointToInt1(AggregateSignatures(sigs).GetPoint())
+		tc.Signature = [2]string{bigToHex32(asig[0]), bigToHex32(asig[1])}
+		apk1 := PointToInt1(AggregatePubKeys1(pubKeys1[:tc.Keys]).GetPoint())
+		tc.Apk1 = [2]string{bigToHex32(apk1[0]), bigToHex32(apk1[1])}
+		apk2 := PointToInt2(AggregatePubKeys2(pubKeys2[:tc.Keys]).GetPoint())
+		tc.Apk2 = [4]string{bigToHex32(apk2[0]), bigToHex32(apk2[1]), bigToHex32(apk2[2]), bigToHex32(apk2[3])}
+	}
+	s, err := json.MarshalIndent(tests, "", "  ")
+	assert.NoError(t, err, "json marshal")
+	println(string(s))
 }

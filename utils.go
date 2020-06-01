@@ -31,5 +31,5 @@ func bigToBytes(bi *big.Int, minLen int) []byte {
 }
 
 func bigToHex32(bi *big.Int) string {
-	return hex.EncodeToString(bigToBytes(bi, 32))
+	return "0x"+hex.EncodeToString(bigToBytes(bi, 32))
 }
