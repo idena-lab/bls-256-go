@@ -17,6 +17,16 @@ func (h Hash) String() string {
 	return "0x" + hex.EncodeToString(h[:])
 }
 
+type Bytes []byte
+
+func (b Bytes) String() string {
+	return "0x" + hex.EncodeToString(b)
+}
+
+func (b Bytes) MarshalText() ([]byte, error) {
+	return []byte(b.String()), nil
+}
+
 type verifyItem struct {
 	// count of keys aggregated
 	Keys int `json:"keys"`
@@ -120,7 +130,7 @@ type idenaInitState struct {
 	// new identities' public keys (G1)
 	PubKeys [][2]string `json:"pubKeys"`
 	// check conditions
-	Checks idenaCheckState `json:"checks"`
+	Checks *idenaCheckState `json:"checks"`
 }
 
 type idenaUpdateState struct {
@@ -131,10 +141,10 @@ type idenaUpdateState struct {
 	// new identities' public keys (G1)
 	NewPubKeys [][2]string `json:"newPubKeys"`
 	// flags of remove identities
-	RemoveFlags []byte `json:"removeFlags"`
-	RemoveCount int    `json:"removeCount"`
+	RemoveFlags Bytes `json:"removeFlags"`
+	RemoveCount int   `json:"removeCount"`
 	// flags of signers
-	SignFlags []byte `json:"signFlags"`
+	SignFlags Bytes `json:"signFlags"`
 	// aggregated signature
 	Signature [2]string `json:"signature"`
 	// aggregated public keys of signers
@@ -148,8 +158,8 @@ type idenaTestData struct {
 	Updates []*idenaUpdateState `json:"updates"`
 }
 
-func NewIdentity() *identity {
-	priKey, _ := NewPriKey(nil)
+func NewIdentity(sk *big.Int) *identity {
+	priKey, _ := NewPriKey(sk)
 	return &identity{
 		pri:  priKey,
 		pub1: priKey.GetPub1(),
@@ -183,12 +193,16 @@ type idenaStateManager struct {
 	epoch int
 }
 
+// make generated data more similar
+var nextPrivateKey = BigFromBase10("666666666666666666666666666666666666666666666666666666666666")
+
 // add n new identities from pool
 // return the slice of the new identities added
 func (m *idenaStateManager) addIdentities(n int) identities {
 	if len(m.pool) < n {
 		for i := 0; i < n; i++ {
-			m.pool = append(m.pool, NewIdentity())
+			m.pool = append(m.pool, NewIdentity(nextPrivateKey))
+			nextPrivateKey = nextPrivateKey.Add(nextPrivateKey, big.NewInt(1))
 		}
 	}
 	rand.Shuffle(len(m.pool), func(i, j int) {
@@ -275,7 +289,7 @@ func (m *idenaStateManager) updateRoot(newIds identities, rmFlags []byte) {
 		bytes = append(bytes, BigToBytes(xy[1], 32)...)
 		copy(hIds[:], Keccak256(bytes))
 	}
-	bytes := append(m.root[:], BigToBytes(big.NewInt(int64(m.epoch)), 16)...)
+	bytes := append(m.root[:], BigToBytes(big.NewInt(int64(m.epoch)), 32)...)
 	bytes = append(bytes, hIds[:]...)
 	bytes = append(bytes, Keccak256(rmFlags)...)
 	copy(m.root[:], Keccak256(bytes))
@@ -304,7 +318,7 @@ func (m *idenaStateManager) getCheckState() *idenaCheckState {
 	}
 }
 
-func (m *idenaStateManager) doUpdate(comment string, epoch int, signPercent, addCount, rmCount int) *idenaUpdateState {
+func (m *idenaStateManager) doUpdate(epoch int, signPercent, addCount, rmCount int) *idenaUpdateState {
 	signCount := len(m.ids) * signPercent / 100
 	origin := m.clone()
 	m.epoch = epoch
@@ -316,7 +330,7 @@ func (m *idenaStateManager) doUpdate(comment string, epoch int, signPercent, add
 	signature, apk2 := m.aggSign(signers)
 
 	u := &idenaUpdateState{
-		Comment:       comment,
+		Comment:       fmt.Sprintf("epoch(%d): %d signers(%d%%) +%d -%d", epoch, signCount, signPercent, addCount, rmCount),
 		Epoch:         epoch,
 		NewIdentities: newIds.getAddresses(),
 		NewPubKeys:    newIds.getPubKeys(),
@@ -338,13 +352,14 @@ func (m *idenaStateManager) doUpdate(comment string, epoch int, signPercent, add
 
 // generate test cases for init() and update() in contract
 func Test_GenTestsForContractStates(t *testing.T) {
-	m := &idenaStateManager{
-		pool: make(identities, 0, 10000),
-		ids:  make(identities, 0),
-		root: Hash{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-	}
-
+	initEpoch := 44
 	initPop := 100
+	m := &idenaStateManager{
+		epoch: initEpoch,
+		pool:  make(identities, 0, 10000),
+		ids:   make(identities, 0),
+		root:  Hash{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+	}
 	m.addIdentities(initPop)
 	m.updateRoot(m.ids, []byte{})
 	// println(m.root.String())
@@ -352,14 +367,15 @@ func Test_GenTestsForContractStates(t *testing.T) {
 	data := &idenaTestData{}
 	data.Init = &idenaInitState{
 		Comment:    fmt.Sprintf("init with %v identities", initPop),
-		Epoch:      44,
+		Epoch:      initEpoch,
 		Identities: m.ids.getAddresses(),
 		PubKeys:    m.ids.getPubKeys(),
+		Checks:     m.getCheckState(),
 	}
 	data.Updates = make([]*idenaUpdateState, 0)
 
 	data.Updates = append(data.Updates,
-		m.doUpdate("update +1 -0", 45, 70, 1, 0),
+		m.doUpdate(45, 70, 1, 0),
 	)
 
 	println(MustToJson(data, true))
