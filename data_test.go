@@ -117,6 +117,7 @@ func (id *identity) toState() *idState {
 }
 
 type idenaCheckState struct {
+	Valid      bool     `json:"valid"`
 	Epoch      int      `json:"epoch"`
 	Population int      `json:"population"`
 	StateRoot  string   `json:"root"`
@@ -342,10 +343,11 @@ func (m *idenaStateManager) aggSign(signers identities) (*Signature, *PubKey2) {
 	return AggregateSignatures(sigs), AggregatePubKeys2(pub2s)
 }
 
-func (m *idenaStateManager) getCheckState() *idenaCheckState {
+func (m *idenaStateManager) getCheckState(valid bool) *idenaCheckState {
 	pop := len(m.ids)
 	return &idenaCheckState{
 		Epoch:      m.epoch,
+		Valid:      valid,
 		Population: pop,
 		StateRoot:  "0x" + hex.EncodeToString(m.root[:]),
 		FirstId:    m.ids[0].toState(),
@@ -390,11 +392,11 @@ func (m *idenaStateManager) doUpdate(t *testing.T, valid bool, epoch int, enough
 	}
 
 	isValidUpdate := epoch >= origin.epoch && signCount >= origin.quorum()
-	assert.True(t, valid, isValidUpdate, "validation error for %s", u.Comment)
+	assert.Equal(t, valid, isValidUpdate, "validation error for %s", u.Comment)
 	if !isValidUpdate {
 		m.reset(origin)
 	}
-	u.Checks = m.getCheckState()
+	u.Checks = m.getCheckState(isValidUpdate)
 	t.Logf("Active identities: %v\n", len(m.ids))
 	return u
 }
@@ -415,36 +417,54 @@ func Test_GenTestsForContractStates(t *testing.T) {
 
 	data := &idenaTestData{}
 	data.Init = &idenaInitState{
-		Comment:    fmt.Sprintf("init with %v identities", initPop),
+		Comment:    fmt.Sprintf("epcoch(%d): init with %v identities", m.epoch, m.population()),
 		Epoch:      initEpoch,
 		Identities: m.ids.getAddresses(),
 		PubKeys:    m.ids.getPubKeys(),
-		Checks:     m.getCheckState(),
+		Checks:     m.getCheckState(true),
 	}
 	data.Updates = make([]*idenaUpdateState, 0)
 
+	// add 1000 identities
+	for i := 0; i < 10; i++ {
+		data.Updates = append(data.Updates, m.doUpdate(t, true, m.epoch+1, true, 0, 100))
+	}
+
+	// case1
 	data.Updates = append(data.Updates,
 		m.doUpdate(t, true, m.epoch+0, true, 0, 0),
-		m.doUpdate(t, true, m.epoch+1, true, 0, 15),
-		m.doUpdate(t, true, m.epoch+1, true, 0, 85),
-		m.doUpdate(t, true, m.epoch+1, true, 0, 100),
-		m.doUpdate(t, true, m.epoch+0, true, 20, 100),
-		m.doUpdate(t, true, m.epoch+2, true, 30, 100),
-		m.doUpdate(t, true, m.epoch+4, true, 100, 100),
-		m.doUpdate(t, true, m.epoch+1, true, 100, 80),
-		m.doUpdate(t, true, m.epoch+1, true, 100, 20),
 		m.doUpdate(t, true, m.epoch+1, true, 100, 0),
-		m.doUpdate(t, true, m.epoch+1, true, 150, 200),
-		m.doUpdate(t, true, m.epoch+1, true, 200, 300),
-		m.doUpdate(t, true, m.epoch+1, true, 200, 50),
-		m.doUpdate(t, true, m.epoch+1, true, 31, 120),
-		m.doUpdate(t, true, m.epoch+1, true, 20, 200),
-		m.doUpdate(t, true, m.epoch+1, true, 320, 400),
-		m.doUpdate(t, true, m.epoch+1, true, 400, 510),
-		m.doUpdate(t, true, m.epoch+1, true, 200, 300),
-		m.doUpdate(t, true, m.epoch+1, true, 200, 300),
-		m.doUpdate(t, true, m.epoch+1, true, 800, 900),
+		m.doUpdate(t, true, m.epoch+1, true, 0, 100),
+		m.doUpdate(t, true, m.epoch+0, true, 125, 173),
+		m.doUpdate(t, true, m.epoch+2, true, 186, 145),
+		m.doUpdate(t, true, m.epoch+4, true, 210, 180),
+		m.doUpdate(t, true, m.epoch+1, true, 180, 200),
+		// invalid cases
+		m.doUpdate(t, false, m.epoch+1, false, 100, 120),
+		m.doUpdate(t, false, m.epoch-1, true, 100, 120),
+		// valid again
+		m.doUpdate(t, true, m.epoch+1, true, 80, 110),
 	)
+
+	// // case2
+	// // add 1000 identities
+	// for i := 0; i < 10; i++ {
+	// 	data.Updates = append(data.Updates, m.doUpdate(t, true, m.epoch+1, true, 0, 100))
+	// }
+	// data.Updates = append(data.Updates,
+	// 	m.doUpdate(t, true, m.epoch+1, true, 100, 0),
+	// 	m.doUpdate(t, true, m.epoch+1, true, 100, 100),
+	// 	m.doUpdate(t, true, m.epoch+1, true, 100, 200),
+	// 	m.doUpdate(t, true, m.epoch+1, true, 200, 100),
+	// 	m.doUpdate(t, true, m.epoch+1, true, 200, 200),
+	// 	m.doUpdate(t, true, m.epoch+1, true, 300, 100),
+	// 	m.doUpdate(t, true, m.epoch+1, true, 300, 200),
+	// 	m.doUpdate(t, true, m.epoch+1, true, 300, 250),
+	// 	// out of gas
+	// 	// m.doUpdate(t, true, m.epoch+1, true, 100, 300),
+	// 	// m.doUpdate(t, true, m.epoch+1, true, 200, 300),
+	// 	// m.doUpdate(t, true, m.epoch+1, true, 300, 300),
+	// )
 
 	println(MustToJson(data, true))
 }
