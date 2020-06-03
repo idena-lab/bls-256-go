@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"math/big"
 	"math/rand"
+	"sort"
 	"testing"
 )
 
@@ -82,6 +83,8 @@ func Test_GenTestsForContractVerify(t *testing.T) {
 		tc.Apk1 = apk1.ToHex()
 		apk2 := AggregatePubKeys2(pubKeys2[:tc.Keys])
 		tc.Apk2 = apk2.ToHex()
+
+		assert.True(t, Verify([]byte(tc.Message), asig, apk2))
 	}
 	s, err := json.MarshalIndent(tests, "", "  ")
 	assert.NoError(t, err, "json marshal")
@@ -159,7 +162,7 @@ type idenaTestData struct {
 }
 
 func NewIdentity(sk *big.Int) *identity {
-	priKey, _ := NewPriKey(sk)
+	priKey, _ := NewPriKey(new(big.Int).Set(sk))
 	return &identity{
 		pri:  priKey,
 		pub1: priKey.GetPub1(),
@@ -196,44 +199,73 @@ type idenaStateManager struct {
 // make generated data more similar
 var nextPrivateKey = BigFromBase10("666666666666666666666666666666666666666666666666666666666666")
 
-// add n new identities from pool
-// return the slice of the new identities added
-func (m *idenaStateManager) addIdentities(n int) identities {
+// get n identities from pool
+// the removed identities in the pool may be returned
+// return the slice of the new identities
+func (m *idenaStateManager) getIdsFromPool(n int) identities {
 	if len(m.pool) < n {
 		for i := 0; i < n; i++ {
 			m.pool = append(m.pool, NewIdentity(nextPrivateKey))
 			nextPrivateKey = nextPrivateKey.Add(nextPrivateKey, big.NewInt(1))
 		}
 	}
+	// randomly select ids from the pool
 	rand.Shuffle(len(m.pool), func(i, j int) {
 		m.pool[i], m.pool[j] = m.pool[j], m.pool[i]
 	})
 	ret := append(identities{}, m.pool[len(m.pool)-n:]...)
 	m.pool = m.pool[:len(m.pool)-n]
-	m.ids = append(m.ids, ret...)
 	return ret
 }
 
-// randomly remove n identities in ids
-// returns the bit set of the removed indexes
-// removed identities will be appended to pool (used to test reused identities)
-func (m *idenaStateManager) removeIds(n int) []byte {
-	if n < 0 || n > len(m.ids) {
-		panic("invalid n to remove")
+// change the set of active identities
+// the rmCount identities to remove are selected randomly
+// the removed identities will be appended to pool (used to test reused identities)
+// returns the bit set of the removed indexes, the slice of new identities added
+func (m *idenaStateManager) changeIds(rmCount, addCount int) ([]byte, identities) {
+	if rmCount < 0 || rmCount > len(m.ids) {
+		panic(fmt.Errorf("try to remove %d from %d ids", rmCount, len(m.ids)))
 	}
+	newIds := m.getIdsFromPool(addCount)
+	// randomly select indexes to remove
 	flags := make([]byte, (len(m.ids)+7)/8)
-	r := rand.Perm(len(m.ids))
-	// remove the first n indexes
-	for i := 0; i < n; i++ {
-		m.pool = append(m.pool, m.ids[r[i]])
-		flags[r[i]/8] |= 1 << (r[i] % 8)
+	rmIndexes := rand.Perm(len(m.ids))[:rmCount]
+	sort.Ints(rmIndexes)
+	// do the remove and add
+	// the removed slots be filled by the new id first
+	inserted := 0
+	empties := make([]int, 0)
+	for i := 0; i < rmCount; i++ {
+		pos := rmIndexes[i]
+		flags[pos/8] |= 1 << (pos % 8)
+		m.pool = append(m.pool, m.ids[pos])
+		if inserted < len(newIds) {
+			m.ids[pos] = newIds[inserted]
+			inserted++
+		} else {
+			empties = append(empties, pos)
+		}
 	}
-	remain := make(identities, 0, len(m.ids)-n)
-	for i := n; i < len(m.ids); i++ {
-		remain = append(remain, m.ids[r[i]])
+	// the remaining new ids will be appended if `addCount > rmCount`
+	// the remaining removed slots will be filled by the latter ids from the end if `addCount < rmCount`
+	if inserted < len(newIds) {
+		m.ids = append(m.ids, newIds[inserted:]...)
+	} else {
+		moving := len(m.ids) - 1
+		for head, tail := 0, len(empties)-1; head <= tail; head++ {
+			for ; moving == empties[tail] && moving >= empties[head]; moving-- {
+				tail--
+			}
+			if moving >= empties[head] {
+				m.ids[empties[head]] = m.ids[moving]
+				moving--
+			} else {
+				break
+			}
+		}
+		m.ids = m.ids[:moving+1]
 	}
-	m.ids = remain
-	return flags
+	return flags, newIds
 }
 
 func (m *idenaStateManager) clone() *idenaStateManager {
@@ -260,7 +292,11 @@ func (m *idenaStateManager) reset(o *idenaStateManager) {
 }
 
 func (m *idenaStateManager) quorum() int {
-	return len(m.ids)*2/3 + 1
+	return (m.population()*2-1)/3 + 1
+}
+
+func (m *idenaStateManager) population() int {
+	return len(m.ids)
 }
 
 // collect signers with the bit set flags
@@ -297,8 +333,8 @@ func (m *idenaStateManager) updateRoot(newIds identities, rmFlags []byte) {
 
 // sign and aggregate signatures
 func (m *idenaStateManager) aggSign(signers identities) (*Signature, *PubKey2) {
-	pub2s := make([]*PubKey2, len(signers))
 	sigs := make([]*Signature, len(signers))
+	pub2s := make([]*PubKey2, len(signers))
 	for i, id := range signers {
 		sigs[i] = id.pri.Sign(m.root[:])
 		pub2s[i] = id.pub2
@@ -318,19 +354,30 @@ func (m *idenaStateManager) getCheckState() *idenaCheckState {
 	}
 }
 
-func (m *idenaStateManager) doUpdate(epoch int, signPercent, addCount, rmCount int) *idenaUpdateState {
-	signCount := len(m.ids) * signPercent / 100
+func (m *idenaStateManager) doUpdate(t *testing.T, valid bool, epoch int, enoughSigner bool, rmCount, addCount int) *idenaUpdateState {
+	signCount := m.quorum() + rand.Intn(m.population()-m.quorum()) + 1
+	if !enoughSigner {
+		signCount = rand.Intn(m.quorum()-1) + 1
+	}
+
 	origin := m.clone()
 	m.epoch = epoch
 	signers, signFlags := m.randomSigners(signCount)
-	rmFlags := m.removeIds(rmCount)
-	newIds := m.addIdentities(addCount)
+	rmFlags, newIds := m.changeIds(rmCount, addCount)
 
 	m.updateRoot(newIds, rmFlags)
 	signature, apk2 := m.aggSign(signers)
+	// check signature
+	assert.True(t, Verify(m.root[:], signature, apk2))
+	// check state
+	assert.Equal(t, len(origin.ids)-rmCount+addCount, len(m.ids))
 
+	comment := fmt.Sprintf(
+		"epoch(%d): %d identities -%d +%d by %d signers(%.2f%%)",
+		epoch, len(origin.ids), rmCount, addCount, signCount, float64(signCount)*100/float64(origin.population()),
+	)
 	u := &idenaUpdateState{
-		Comment:       fmt.Sprintf("epoch(%d): %d signers(%d%%) +%d -%d", epoch, signCount, signPercent, addCount, rmCount),
+		Comment:       comment,
 		Epoch:         epoch,
 		NewIdentities: newIds.getAddresses(),
 		NewPubKeys:    newIds.getPubKeys(),
@@ -341,12 +388,14 @@ func (m *idenaStateManager) doUpdate(epoch int, signPercent, addCount, rmCount i
 		Apk2:          apk2.ToHex(),
 		Checks:        nil,
 	}
-	isValidUpdate := signCount >= m.quorum()
 
+	isValidUpdate := epoch >= origin.epoch && signCount >= origin.quorum()
+	assert.True(t, valid, isValidUpdate, "validation error for %s", u.Comment)
 	if !isValidUpdate {
 		m.reset(origin)
 	}
 	u.Checks = m.getCheckState()
+	t.Logf("Active identities: %v\n", len(m.ids))
 	return u
 }
 
@@ -360,7 +409,7 @@ func Test_GenTestsForContractStates(t *testing.T) {
 		ids:   make(identities, 0),
 		root:  Hash{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 	}
-	m.addIdentities(initPop)
+	m.ids = m.getIdsFromPool(initPop)
 	m.updateRoot(m.ids, []byte{})
 	// println(m.root.String())
 
@@ -375,7 +424,26 @@ func Test_GenTestsForContractStates(t *testing.T) {
 	data.Updates = make([]*idenaUpdateState, 0)
 
 	data.Updates = append(data.Updates,
-		m.doUpdate(45, 70, 1, 0),
+		m.doUpdate(t, true, m.epoch+0, true, 0, 0),
+		m.doUpdate(t, true, m.epoch+1, true, 0, 15),
+		m.doUpdate(t, true, m.epoch+1, true, 0, 85),
+		m.doUpdate(t, true, m.epoch+1, true, 0, 100),
+		m.doUpdate(t, true, m.epoch+0, true, 20, 100),
+		m.doUpdate(t, true, m.epoch+2, true, 30, 100),
+		m.doUpdate(t, true, m.epoch+4, true, 100, 100),
+		m.doUpdate(t, true, m.epoch+1, true, 100, 80),
+		m.doUpdate(t, true, m.epoch+1, true, 100, 20),
+		m.doUpdate(t, true, m.epoch+1, true, 100, 0),
+		m.doUpdate(t, true, m.epoch+1, true, 150, 200),
+		m.doUpdate(t, true, m.epoch+1, true, 200, 300),
+		m.doUpdate(t, true, m.epoch+1, true, 200, 50),
+		m.doUpdate(t, true, m.epoch+1, true, 31, 120),
+		m.doUpdate(t, true, m.epoch+1, true, 20, 200),
+		m.doUpdate(t, true, m.epoch+1, true, 320, 400),
+		m.doUpdate(t, true, m.epoch+1, true, 400, 510),
+		m.doUpdate(t, true, m.epoch+1, true, 200, 300),
+		m.doUpdate(t, true, m.epoch+1, true, 200, 300),
+		m.doUpdate(t, true, m.epoch+1, true, 800, 900),
 	)
 
 	println(MustToJson(data, true))
