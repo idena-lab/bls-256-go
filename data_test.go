@@ -1,11 +1,12 @@
 package bls
 
 import (
-	"crypto/sha256"
+	"bytes"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"github.com/stretchr/testify/assert"
+	"golang.org/x/crypto/sha3"
 	"math/big"
 	"math/rand"
 	"sort"
@@ -26,6 +27,62 @@ func (b Bytes) String() string {
 
 func (b Bytes) MarshalText() ([]byte, error) {
 	return []byte(b.String()), nil
+}
+
+const AddressLength = 20
+
+// Address represents the 20 byte address of an Ethereum account.
+type Address [AddressLength]byte
+
+// BytesToAddress returns Address with value b.
+// If b is larger than len(h), b will be cropped from the left.
+func BytesToAddress(b []byte) Address {
+	var a Address
+	a.SetBytes(b)
+	return a
+}
+
+// Bytes gets the string representation of the underlying address.
+func (a Address) Bytes() []byte { return a[:] }
+
+// Hex returns an EIP55-compliant hex string representation of the address.
+func (a Address) Hex() string {
+	unchecksummed := hex.EncodeToString(a[:])
+	sha := sha3.NewLegacyKeccak256()
+	sha.Write([]byte(unchecksummed))
+	hash := sha.Sum(nil)
+
+	result := []byte(unchecksummed)
+	for i := 0; i < len(result); i++ {
+		hashByte := hash[i/2]
+		if i%2 == 0 {
+			hashByte = hashByte >> 4
+		} else {
+			hashByte &= 0xf
+		}
+		if result[i] > '9' && hashByte > 7 {
+			result[i] -= 32
+		}
+	}
+	return "0x" + string(result)
+}
+
+// SetBytes sets the address to the value of b.
+// If b is larger than len(a) it will panic.
+func (a *Address) SetBytes(b []byte) {
+	if len(b) > len(a) {
+		b = b[len(b)-AddressLength:]
+	}
+	copy(a[AddressLength-len(b):], b)
+}
+
+// String implements fmt.Stringer.
+func (a Address) String() string {
+	return a.Hex()
+}
+
+func (a Address) MarshalText() ([]byte, error) {
+	return []byte(a.Hex()), nil
 }
 
 type verifyItem struct {
@@ -92,6 +149,7 @@ func Test_GenTestsForContractVerify(t *testing.T) {
 }
 
 type identity struct {
+	addr Address
 	pri  *PriKey
 	pub1 *PubKey1
 	pub2 *PubKey2
@@ -99,26 +157,20 @@ type identity struct {
 type identities []*identity
 
 type idState struct {
-	Address string    `json:"address"`
+	Address Address   `json:"address"`
 	PubKey  [2]string `json:"pubKey"`
-}
-
-// attention: this is not the right idena address, just for test
-func (id *identity) getAddress() string {
-	h := sha256.Sum256(id.pub1.GetPoint().Marshal())
-	return "0x" + hex.EncodeToString(h[:20])
 }
 
 func (id *identity) toState() *idState {
 	return &idState{
-		Address: id.getAddress(),
+		Address: id.addr,
 		PubKey:  id.pub1.ToHex(),
 	}
 }
 
 type idenaCheckState struct {
 	Valid      bool     `json:"valid"`
-	Epoch      int      `json:"epoch"`
+	Height     int      `json:"height"`
 	Population int      `json:"population"`
 	StateRoot  string   `json:"root"`
 	FirstId    *idState `json:"firstId"`
@@ -128,9 +180,9 @@ type idenaCheckState struct {
 
 type idenaInitState struct {
 	Comment string `json:"comment"`
-	Epoch   int    `json:"epoch"`
+	Height  int    `json:"height"`
 	// new identities' addresses
-	Identities []string `json:"identities"`
+	Identities []Address `json:"identities"`
 	// new identities' public keys (G1)
 	PubKeys [][2]string `json:"pubKeys"`
 	// check conditions
@@ -139,9 +191,9 @@ type idenaInitState struct {
 
 type idenaUpdateState struct {
 	Comment string `json:"comment"`
-	Epoch   int    `json:"epoch"`
+	Height  int    `json:"height"`
 	// new identities' addresses
-	NewIdentities []string `json:"newIdentities"`
+	NewIdentities []Address `json:"newIdentities"`
 	// new identities' public keys (G1)
 	NewPubKeys [][2]string `json:"newPubKeys"`
 	// flags of remove identities
@@ -164,7 +216,10 @@ type idenaTestData struct {
 
 func NewIdentity(sk *big.Int) *identity {
 	priKey, _ := NewPriKey(new(big.Int).Set(sk))
+	addr := Address{}
+	rand.Read(addr[:])
 	return &identity{
+		addr: addr,
 		pri:  priKey,
 		pub1: priKey.GetPub1(),
 		pub2: priKey.GetPub2(),
@@ -172,10 +227,10 @@ func NewIdentity(sk *big.Int) *identity {
 }
 
 // get all addresses of identities
-func (ids identities) getAddresses() []string {
-	addresses := make([]string, len(ids))
+func (ids identities) getAddresses() []Address {
+	addresses := make([]Address, len(ids))
 	for i := 0; i < len(ids); i++ {
-		addresses[i] = ids[i].getAddress()
+		addresses[i] = ids[i].addr
 	}
 	return addresses
 }
@@ -191,10 +246,10 @@ func (ids identities) getPubKeys() [][2]string {
 }
 
 type idenaStateManager struct {
-	ids   identities
-	pool  identities
-	root  Hash
-	epoch int
+	ids    identities
+	pool   identities
+	root   Hash
+	height int
 }
 
 // make generated data more similar
@@ -216,6 +271,10 @@ func (m *idenaStateManager) getIdsFromPool(n int) identities {
 	})
 	ret := append(identities{}, m.pool[len(m.pool)-n:]...)
 	m.pool = m.pool[:len(m.pool)-n]
+	// sort by addresses (same as implement in idena-go)
+	sort.Slice(ret, func(i, j int) bool {
+		return bytes.Compare(ret[i].addr[:], ret[j].addr[:]) == 1
+	})
 	return ret
 }
 
@@ -271,10 +330,10 @@ func (m *idenaStateManager) changeIds(rmCount, addCount int) ([]byte, identities
 
 func (m *idenaStateManager) clone() *idenaStateManager {
 	cloned := &idenaStateManager{
-		ids:   make(identities, len(m.ids)),
-		pool:  make(identities, len(m.pool)),
-		root:  Hash{},
-		epoch: m.epoch,
+		ids:    make(identities, len(m.ids)),
+		pool:   make(identities, len(m.pool)),
+		root:   Hash{},
+		height: m.height,
 	}
 	copy(cloned.ids, m.ids)
 	copy(cloned.pool, m.pool)
@@ -289,7 +348,7 @@ func (m *idenaStateManager) reset(o *idenaStateManager) {
 	m.ids = o.ids
 	m.pool = o.pool
 	m.root = o.root
-	m.epoch = o.epoch
+	m.height = o.height
 }
 
 func (m *idenaStateManager) quorum() int {
@@ -319,14 +378,13 @@ func (m *idenaStateManager) randomSigners(n int) (identities, []byte) {
 func (m *idenaStateManager) updateRoot(newIds identities, rmFlags []byte) {
 	hIds := Hash{}
 	for _, id := range newIds {
-		addr, _ := hex.DecodeString(id.getAddress()[2:])
 		xy := PointToInt1(id.pub1.GetPoint())
-		bytes := append(hIds[:], addr...)
+		bytes := append(hIds[:], id.addr[:]...)
 		bytes = append(bytes, BigToBytes(xy[0], 32)...)
 		bytes = append(bytes, BigToBytes(xy[1], 32)...)
 		copy(hIds[:], Keccak256(bytes))
 	}
-	bytes := append(m.root[:], BigToBytes(big.NewInt(int64(m.epoch)), 32)...)
+	bytes := append(m.root[:], BigToBytes(big.NewInt(int64(m.height)), 32)...)
 	bytes = append(bytes, hIds[:]...)
 	bytes = append(bytes, Keccak256(rmFlags)...)
 	copy(m.root[:], Keccak256(bytes))
@@ -346,7 +404,7 @@ func (m *idenaStateManager) aggSign(signers identities) (*Signature, *PubKey2) {
 func (m *idenaStateManager) getCheckState(valid bool) *idenaCheckState {
 	pop := len(m.ids)
 	return &idenaCheckState{
-		Epoch:      m.epoch,
+		Height:     m.height,
 		Valid:      valid,
 		Population: pop,
 		StateRoot:  "0x" + hex.EncodeToString(m.root[:]),
@@ -356,14 +414,14 @@ func (m *idenaStateManager) getCheckState(valid bool) *idenaCheckState {
 	}
 }
 
-func (m *idenaStateManager) doUpdate(t *testing.T, valid bool, epoch int, enoughSigner bool, rmCount, addCount int) *idenaUpdateState {
+func (m *idenaStateManager) doUpdate(t *testing.T, valid bool, height int, enoughSigner bool, rmCount, addCount int) *idenaUpdateState {
 	signCount := m.quorum() + rand.Intn(m.population()-m.quorum()) + 1
 	if !enoughSigner {
 		signCount = rand.Intn(m.quorum()-1) + 1
 	}
 
 	origin := m.clone()
-	m.epoch = epoch
+	m.height = height
 	signers, signFlags := m.randomSigners(signCount)
 	rmFlags, newIds := m.changeIds(rmCount, addCount)
 
@@ -375,12 +433,12 @@ func (m *idenaStateManager) doUpdate(t *testing.T, valid bool, epoch int, enough
 	assert.Equal(t, len(origin.ids)-rmCount+addCount, len(m.ids))
 
 	comment := fmt.Sprintf(
-		"epoch(%d): %d identities -%d +%d by %d signers(%.2f%%)",
-		epoch, len(origin.ids), rmCount, addCount, signCount, float64(signCount)*100/float64(origin.population()),
+		"height(%d): %d identities -%d +%d by %d signers(%.2f%%)",
+		height, len(origin.ids), rmCount, addCount, signCount, float64(signCount)*100/float64(origin.population()),
 	)
 	u := &idenaUpdateState{
 		Comment:       comment,
-		Epoch:         epoch,
+		Height:        height,
 		NewIdentities: newIds.getAddresses(),
 		NewPubKeys:    newIds.getPubKeys(),
 		RemoveFlags:   rmFlags,
@@ -391,7 +449,7 @@ func (m *idenaStateManager) doUpdate(t *testing.T, valid bool, epoch int, enough
 		Checks:        nil,
 	}
 
-	isValidUpdate := epoch >= origin.epoch && signCount >= origin.quorum()
+	isValidUpdate := height > origin.height && signCount >= origin.quorum()
 	assert.Equal(t, valid, isValidUpdate, "validation error for %s", u.Comment)
 	if !isValidUpdate {
 		m.reset(origin)
@@ -403,13 +461,13 @@ func (m *idenaStateManager) doUpdate(t *testing.T, valid bool, epoch int, enough
 
 // generate test cases for init() and update() in contract
 func Test_GenTestsForContractStates(t *testing.T) {
-	initEpoch := 44
+	initHeight := 12345678
 	initPop := 100
 	m := &idenaStateManager{
-		epoch: initEpoch,
-		pool:  make(identities, 0, 10000),
-		ids:   make(identities, 0),
-		root:  Hash{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+		height: initHeight,
+		pool:   make(identities, 0, 10000),
+		ids:    make(identities, 0),
+		root:   Hash{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 	}
 	m.ids = m.getIdsFromPool(initPop)
 	m.updateRoot(m.ids, []byte{})
@@ -417,8 +475,8 @@ func Test_GenTestsForContractStates(t *testing.T) {
 
 	data := &idenaTestData{}
 	data.Init = &idenaInitState{
-		Comment:    fmt.Sprintf("epcoch(%d): init with %v identities", m.epoch, m.population()),
-		Epoch:      initEpoch,
+		Comment:    fmt.Sprintf("epcoch(%d): init with %v identities", m.height, m.population()),
+		Height:     initHeight,
 		Identities: m.ids.getAddresses(),
 		PubKeys:    m.ids.getPubKeys(),
 		Checks:     m.getCheckState(true),
@@ -427,43 +485,44 @@ func Test_GenTestsForContractStates(t *testing.T) {
 
 	// add 1000 identities
 	for i := 0; i < 10; i++ {
-		data.Updates = append(data.Updates, m.doUpdate(t, true, m.epoch+1, true, 0, 100))
+		data.Updates = append(data.Updates, m.doUpdate(t, true, m.height+1, true, 0, 100))
 	}
 
 	// case1
 	data.Updates = append(data.Updates,
-		m.doUpdate(t, true, m.epoch+0, true, 0, 0),
-		m.doUpdate(t, true, m.epoch+1, true, 100, 0),
-		m.doUpdate(t, true, m.epoch+1, true, 0, 100),
-		m.doUpdate(t, true, m.epoch+0, true, 125, 173),
-		m.doUpdate(t, true, m.epoch+2, true, 186, 145),
-		m.doUpdate(t, true, m.epoch+4, true, 210, 180),
-		m.doUpdate(t, true, m.epoch+1, true, 180, 200),
+		m.doUpdate(t, true, m.height+1, true, 0, 0),
+		m.doUpdate(t, true, m.height+1, true, 100, 0),
+		m.doUpdate(t, true, m.height+2, true, 0, 100),
+		m.doUpdate(t, true, m.height+1, true, 125, 173),
+		m.doUpdate(t, true, m.height+2, true, 186, 145),
+		m.doUpdate(t, true, m.height+4, true, 210, 180),
+		m.doUpdate(t, true, m.height+1, true, 180, 200),
 		// invalid cases
-		m.doUpdate(t, false, m.epoch+1, false, 100, 120),
-		m.doUpdate(t, false, m.epoch-1, true, 100, 120),
+		m.doUpdate(t, false, m.height, true, 100, 120),
+		m.doUpdate(t, false, m.height-1, true, 100, 120),
+		m.doUpdate(t, false, m.height+1, false, 100, 120),
 		// valid again
-		m.doUpdate(t, true, m.epoch+1, true, 80, 110),
+		m.doUpdate(t, true, m.height+1, true, 80, 110),
 	)
 
 	// // case2
 	// // add 1000 identities
 	// for i := 0; i < 10; i++ {
-	// 	data.Updates = append(data.Updates, m.doUpdate(t, true, m.epoch+1, true, 0, 100))
+	// 	data.Updates = append(data.Updates, m.doUpdate(t, true, m.height+1, true, 0, 100))
 	// }
 	// data.Updates = append(data.Updates,
-	// 	m.doUpdate(t, true, m.epoch+1, true, 100, 0),
-	// 	m.doUpdate(t, true, m.epoch+1, true, 100, 100),
-	// 	m.doUpdate(t, true, m.epoch+1, true, 100, 200),
-	// 	m.doUpdate(t, true, m.epoch+1, true, 200, 100),
-	// 	m.doUpdate(t, true, m.epoch+1, true, 200, 200),
-	// 	m.doUpdate(t, true, m.epoch+1, true, 300, 100),
-	// 	m.doUpdate(t, true, m.epoch+1, true, 300, 200),
-	// 	m.doUpdate(t, true, m.epoch+1, true, 300, 250),
+	// 	m.doUpdate(t, true, m.height+1, true, 100, 0),
+	// 	m.doUpdate(t, true, m.height+1, true, 100, 100),
+	// 	m.doUpdate(t, true, m.height+1, true, 100, 200),
+	// 	m.doUpdate(t, true, m.height+1, true, 200, 100),
+	// 	m.doUpdate(t, true, m.height+1, true, 200, 200),
+	// 	m.doUpdate(t, true, m.height+1, true, 300, 100),
+	// 	m.doUpdate(t, true, m.height+1, true, 300, 200),
+	// 	m.doUpdate(t, true, m.height+1, true, 300, 250),
 	// 	// out of gas
-	// 	// m.doUpdate(t, true, m.epoch+1, true, 100, 300),
-	// 	// m.doUpdate(t, true, m.epoch+1, true, 200, 300),
-	// 	// m.doUpdate(t, true, m.epoch+1, true, 300, 300),
+	// 	// m.doUpdate(t, true, m.height+1, true, 100, 300),
+	// 	// m.doUpdate(t, true, m.height+1, true, 200, 300),
+	// 	// m.doUpdate(t, true, m.height+1, true, 300, 300),
 	// )
 
 	println(MustToJson(data, true))
