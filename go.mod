@@ -1,4 +1,4 @@
-module bls-256-go
+module github.com/idena-lab/bls-256-go
 
 go 1.13
 

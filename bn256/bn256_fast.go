@@ -8,7 +8,7 @@
 package bn256
 
 import (
-	"bls-256-go/bn256/cloudflare"
+	"github.com/idena-lab/bls-256-go/bn256/cloudflare"
 	"io"
 	"math/big"
 )

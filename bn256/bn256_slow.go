@@ -8,7 +8,7 @@
 package bn256
 
 import (
-	"bls-256-go/bn256/google"
+	"github.com/idena-lab/bls-256-go/bn256/google"
 	"io"
 	"math/big"
 )

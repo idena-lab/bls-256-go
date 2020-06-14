@@ -1,8 +1,8 @@
 package bls
 
 import (
-	"bls-256-go/bn256"
 	"crypto/rand"
+	"github.com/idena-lab/bls-256-go/bn256"
 	"golang.org/x/crypto/sha3"
 	"math/big"
 )

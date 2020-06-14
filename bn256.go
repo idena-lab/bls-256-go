@@ -1,7 +1,7 @@
 package bls
 
 import (
-	"bls-256-go/bn256"
+	"github.com/idena-lab/bls-256-go/bn256"
 	"math/big"
 )
 
