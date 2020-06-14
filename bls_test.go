@@ -74,8 +74,8 @@ func TestSign(t *testing.T) {
 		s := priKey.Sign(m)
 		ps := PointToInt1(s.GetPoint())
 		// println(PointToStringG1(s.GetPoint()))
-		assert.Equal(t, pair[1][2:], BigToHex32(ps[0]), string(m))
-		assert.Equal(t, pair[2][2:], BigToHex32(ps[1]), string(m))
+		assert.Equal(t, pair[1], BigToHex32(ps[0]), string(m))
+		assert.Equal(t, pair[2], BigToHex32(ps[1]), string(m))
 
 		// verify signature
 		s, err = NewSignature(ps[0], ps[1])
