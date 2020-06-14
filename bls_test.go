@@ -1,8 +1,10 @@
 package bls
 
 import (
+	"crypto/rand"
 	"encoding/hex"
 	"github.com/stretchr/testify/assert"
+	rand2 "math/rand"
 	"testing"
 )
 
@@ -107,3 +109,16 @@ func TestSign(t *testing.T) {
 	}
 }
 
+func TestGenerateFromSeed(t *testing.T) {
+	for i := 0; i < 100; i++ {
+		seed := make([]byte, rand2.Intn(100))
+		rand.Read(seed)
+		pri, err := GenerateFromSeed(seed)
+		assert.NoError(t, err, hex.EncodeToString(seed))
+		for j := 0; j < 10; j++ {
+			pri2, err := GenerateFromSeed(seed)
+			assert.NoError(t, err, hex.EncodeToString(seed))
+			assert.Equal(t, pri.ToHex(), pri2.ToHex())
+		}
+	}
+}

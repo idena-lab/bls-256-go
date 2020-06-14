@@ -48,6 +48,39 @@ func NewPriKey(k *big.Int) (*PriKey, error) {
 	return sk, nil
 }
 
+type SeedReader struct {
+	seed []byte
+	pos  int
+}
+
+func NewSeedReader(seed []byte) *SeedReader {
+	return &SeedReader{
+		seed: Keccak256(seed),
+		pos:  0,
+	}
+}
+
+func (r *SeedReader) Read(p []byte) (n int, err error) {
+	for n < len(p) {
+		if r.pos >= len(r.seed) {
+			r.seed = Keccak256(r.seed)
+			r.pos = 0
+		}
+		m := copy(p[n:], r.seed[r.pos:])
+		n += m
+		r.pos += m
+	}
+	return n, nil
+}
+
+func GenerateFromSeed(seed []byte) (*PriKey, error) {
+	k, _, err := bn256.RandomG1(NewSeedReader(seed))
+	if err != nil {
+		return nil, err
+	}
+	return NewPriKey(k)
+}
+
 // return public key on G1
 func (k *PriKey) GetPub1() *PubKey1 {
 	pk := new(bn256.G1).ScalarBaseMult(&k.sk)
